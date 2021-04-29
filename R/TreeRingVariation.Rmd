@@ -1,0 +1,391 @@
+---
+title: "Climate correlations and variability"
+author: "Kelly Heilman"
+date: "4/20/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+library(here)
+library(dplR)
+library(reshape2)
+```
+
+We detrended (removed long term trends that are not likely due to year-to-year variations in cliamte) to get a Ring Width Index (RWI) for each tree ring time series. We then use RWI
+
+```{r, echo = FALSE , warning = FALSE, message = FALSE}
+## Preprocessing and sorting by quantile 
+
+AZ.PIPO <- read.delim("/Users/kah/Documents/docker_pecan/pecan/FIA_inc_data/AZ_FIA_RWL_PRISM_allinone_04192017.txt", stringsAsFactors = F) ### 820 trees
+
+### merge together three diameter columns
+AZ.PIPO$DIA <- ifelse(is.na(AZ.PIPO$TREE_DIA), AZ.PIPO$SITETREE_DIA, AZ.PIPO$TREE_DIA) # combine together FIADB diameter measurements for trees and site trees
+AZ.PIPO$DIA <- ifelse(is.na(AZ.PIPO$DIA), AZ.PIPO$DBH, AZ.PIPO$DIA) # replace missing data with DBH recorded from core mounts (DBH)
+temp2 <- AZ.PIPO %>% select(keynew, Widths, DateFirst, DateEnd)
+
+
+# first we deal with the tree with cores  
+  temp2$Widths <- as.character(temp2$Widths)
+  first.start.yr <- min(temp2$DateFirst, na.rm=T) #1719
+  last.DBH.yr.1 <- max(temp2$DateEnd, na.rm=T) # 2010
+  last.DBH.yr.2 <- 1900 # number guaranteed to be smaller than last.DBH.yr.1
+  
+ 
+  last.meas.yr <- max(last.DBH.yr.1, last.DBH.yr.2) # 2015
+  years <- seq(first.start.yr, last.meas.yr) # 1719:2015, length = 297
+  y.matrix <- matrix(data=NA, nrow=nrow(temp2), ncol=length(years)) #tree ring measurements go in y.matrix
+  colnames(y.matrix) <- years
+  
+  for (t in 1:nrow(temp2)) {
+    width.string <- temp2$Widths[t]
+    width.vector <- as.numeric(unlist(strsplit(x = width.string, split = ",")))
+    start.column <- which(years == temp2$DateFirst[t])
+    end.column <- which(years == temp2$DateEnd[t])
+    width.subset <- (end.column - start.column) + 1 # how long should the vectors of TR measurements be?
+    width.vector <- width.vector[1:width.subset] # truncate widths vector to this length (get rid of extra zeros at the end)
+    width.vector <- width.vector*0.1*2 # convert to cm and multiply by 2 to turn radial increment into diameter increment (be careful about what units Tellervo spits out)
+    y.matrix[t, c(start.column:end.column)] <- width.vector # put that vector in y.matrix at the right start year:end year
+  }
+
+  
+y.matrix.m <- melt(y.matrix)
+colnames(y.matrix.m) <- c("Tree", "Year", "rwl")
+  
+y.spread <- data.frame(y.matrix.m %>% spread(key = Tree, value = rwl))
+rownames(y.spread) <- y.spread$Year
+PIPO.AZ.rwl <- as.rwl(y.spread[,2:length(y.spread)])
+   
+   
+# read PIED data in 
+PIED.all <- read.csv("data/pied_all_growth_v4.csv")
+
+PIED.AZ <- PIED.all %>% filter(dataset %in% "AZ") %>% select(year, name, growth) %>% spread(key = name, value = growth)
+
+rownames(PIED.AZ) <- PIED.AZ$year
+PIED.AZ.rwl <- as.rwl(PIED.AZ[,2:length(PIED.AZ)])
+
+# get the PSME data
+
+file_names = list.files("data/PSMEgood/")
+
+full_filenames <- paste0("data/PSMEgood/",file_names)
+
+
+
+# read all the files in the directory in as rwl files
+PSME.rwls = lapply(full_filenames, read.rwl) 
+
+
+# combine all the files into one rwl file for COFECHA crossdating
+PSME.AZ.rwl <- combine.rwl(PSME.rwls)
+
+```
+
+
+```{r, echo = FALSE , warning = FALSE, message = FALSE}
+full.clim.data <- read.csv(paste0(here(), "/data/pipo_all_tmean_ppt_v3.csv"))
+region.rwl <- read.csv("data/trees-rwl-1-31-17.csv") # note that this data is has all RWLS in columsn and a year column
+region.ll <- read.csv("data/locs-env-1-31-17.csv")
+region.ll$SPCD <- as.character(region.ll$SPCD)
+
+rownames(region.rwl) <- years <- region.rwl$Year
+
+# make RWL
+region.rwl <- as.rwl(region.rwl[,3:length(region.rwl)])
+
+
+# get the time series names for each species
+PIED.outside.AZ <- region.ll %>% filter(SPCD %in% "106")
+PIPO.outside.AZ <- region.ll %>% filter(SPCD %in% "122")
+PSME.outside.AZ <- region.ll %>% filter(SPCD %in% "202")
+
+
+# make species specific RWL files
+PIED.oa.rwl <- as.rwl(region.rwl %>% select(PIED.outside.AZ$series))
+PIPO.oa.rwl <- as.rwl(region.rwl %>% select(PIPO.outside.AZ$series))
+PSME.oa.rwl <- as.rwl(region.rwl %>% select(PSME.outside.AZ$series))
+
+
+# comibne the PIPO AZ dataset with ours:
+
+PIPO.rwl <- combine.rwl(PIPO.oa.rwl,  PIPO.AZ.rwl )
+PIED.rwl <- combine.rwl(PIED.oa.rwl,  PIED.AZ.rwl )
+PSME.rwl <- combine.rwl(PSME.oa.rwl,  PSME.AZ.rwl )
+
+
+PIPO.rwl <-  PIPO.AZ.rwl 
+PIED.rwl <-  PIED.AZ.rwl 
+PSME.rwl <-  PSME.AZ.rwl
+
+# # make giant spaghetti plots of the data
+# png(height = 8, width = 8, units = "in", res = 300, "outputs/spag_plot_all_ts_PIED.png")
+# plot(PIED.rwl, plot.type="spag")
+# dev.off()
+# 
+# png(height = 8, width = 8, units = "in", res = 300, "outputs/spag_plot_all_ts_PIPO.png")
+# plot(PIPO.rwl, plot.type="spag")
+# dev.off()
+# 
+# png(height = 8, width = 8, units = "in", res = 300, "outputs/spag_plot_all_ts_PSME.png")
+# plot(PSME.rwl, plot.type="spag")
+# dev.off()
+# 
+# # make reduced plots with 100 cores for each species
+# png(height = 8, width = 8, units = "in", res = 300, "outputs/spag_plot_100_ts_PIED.png")
+# plot(PIED.rwl[,1:100], plot.type="spag")
+# dev.off()
+# 
+# png(height = 8, width = 8, units = "in", res = 300, "outputs/spag_plot_100_ts_PIPO.png")
+# plot(PIPO.rwl[,1:100], plot.type="spag")
+# dev.off()
+# 
+# png(height = 8, width = 8, units = "in", res = 300, "outputs/spag_plot_100_ts_PSME.png")
+# plot(PSME.rwl[,1:100], plot.type="spag")
+# dev.off()
+
+
+```
+
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+# get stats on each species:
+rwl.stats.PIED <- rwl.stats(PIED.rwl) 
+rwl.stats.PIPO <- rwl.stats(PIPO.rwl) 
+rwl.stats.PSME <- rwl.stats(PSME.rwl) 
+
+# detrend all using splines
+PIPO.rwi <- detrend(PIPO.rwl, method="Spline")
+PSME.rwi <- detrend(PSME.rwl, method="Spline")
+PIED.rwi <- detrend(PIED.rwl, method="Spline")
+# got warnings: Warning message:
+# In (function (y, y.name = "", make.plot = TRUE, method = c("Spline",  :
+#                                                              Spline fit is not all positive
+
+PIPO.rwi.modnegexp <- detrend(PIPO.rwl, method="ModNegExp", constrain.nls = "when.fail")
+PSME.rwi.modnegexp <- detrend(PSME.rwl, method="ModNegExp", constrain.nls = "when.fail")
+PIED.rwi.modnegexp <- detrend(PIED.rwl, method="ModNegExp", constrain.nls = "when.fail")
+
+PIPO.rwi.friedman <- detrend(PIPO.rwl, method="Friedman")
+PSME.rwi.friedman <- detrend(PSME.rwl, method="Friedman")
+PIED.rwi.friedman <- detrend(PIED.rwl, method="Friedman")
+
+# get stats for the overall set of rwi:
+
+PSME.rwi.stats <- rwi.stats(PSME.rwi, prewhiten=TRUE)
+PIED.rwi.stats <- rwi.stats(PIED.rwi, prewhiten=TRUE)
+PIPO.rwi.stats <- rwi.stats(PIPO.rwi, prewhiten=TRUE)
+
+PSME.rwi.stats.modnegexp <- rwi.stats(PSME.rwi.modnegexp , prewhiten=TRUE)
+PIED.rwi.stats.modnegexp  <- rwi.stats(PIED.rwi.modnegexp , prewhiten=TRUE)
+PIPO.rwi.stats.modnegexp  <- rwi.stats(PIPO.rwi.modnegexp , prewhiten=TRUE)
+
+PSME.rwi.stats.friedman <- rwi.stats(PSME.rwi.friedman , prewhiten=TRUE)
+PIED.rwi.stats.friedman  <- rwi.stats(PIED.rwi.friedman , prewhiten=TRUE)
+PIPO.rwi.stats.friedman  <- rwi.stats(PIPO.rwi.friedman , prewhiten=TRUE)
+# rbar is generally low (expected with fia data, but splines or modnegexp probably the choice)
+
+# develop chronologies from the 3 different detrended timeseries
+PSME.rwi.chron <- chron(PSME.rwi, prewhiten=TRUE)
+PIED.rwi.chron <- chron(PIED.rwi, prewhiten=TRUE)
+PIPO.rwi.chron <- chron(PIPO.rwi, prewhiten=TRUE)
+
+plot(PSME.rwi.chron)
+plot(PIED.rwi.chron)
+plot(PIPO.rwi.chron)
+
+PSME.rwi.chron.modnegexp <- chron(PSME.rwi.modnegexp , prewhiten=TRUE)
+PIED.rwi.chron.modnegexp  <- chron(PIED.rwi.modnegexp , prewhiten=TRUE)
+PIPO.rwi.chron.modnegexp  <- chron(PIPO.rwi.modnegexp , prewhiten=TRUE)
+
+PSME.rwi.chron.friedman <- chron(PSME.rwi.friedman , prewhiten=TRUE)
+PIED.rwi.chron.friedman  <- chron(PIED.rwi.friedman , prewhiten=TRUE)
+PIPO.rwi.chron.friedman  <- chron(PIPO.rwi.friedman , prewhiten=TRUE)
+
+
+# get interseries correlations:
+
+PIED.rho <- interseries.cor(PIED.rwi, prewhiten=TRUE, method="spearman")
+PIPO.rho <- interseries.cor(PIPO.rwi, prewhiten=TRUE, method="spearman")
+PSME.rho <- interseries.cor(PSME.rwi, prewhiten=TRUE, method="spearman")
+
+
+# visualize range of residual correlations
+#summary(PIED.rho$res.cor)
+#summary(PIPO.rho$res.cor)
+#summary(PSME.rho$res.cor)
+
+#hist(PIED.rho$res.cor)
+#hist(PSME.rho$res.cor)
+#hist(PIPO.rho$res.cor)
+
+# sort by correlation with each other 
+# get 10 trees from 10 groups-- each quantiles (range of interseries correlations)
+PIED.qs <- quantile(PIED.rho$res.cor, c(0, 0.1,0.2,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1))
+PIED.rho <- PIED.rho %>% mutate(corr.quant = cut(res.cor, breaks=PIED.qs, labels=c("0.1","0.2","0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1")))
+boxplot(PIED.rho$res.cor~PIED.rho$corr.quant)
+
+PIPO.qs <- quantile(PIPO.rho$res.cor, c(0, 0.1,0.2,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1))
+PIPO.rho <- PIPO.rho %>% mutate(corr.quant = cut(res.cor, breaks=PIPO.qs, labels=c("0.1","0.2","0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1")))
+boxplot(PIPO.rho$res.cor~PIPO.rho$corr.quant)
+
+PSME.qs <- quantile(PSME.rho$res.cor, c(0, 0.1,0.2,0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1))
+PSME.rho <- PSME.rho %>% mutate(corr.quant = cut(res.cor, breaks=PSME.qs, labels=c("0.1","0.2","0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1")))
+boxplot(PSME.rho$res.cor~PSME.rho$corr.quant)
+
+PSME.rho$series <- rownames(PSME.rho)
+PIPO.rho$series <- rownames(PIPO.rho)
+PIED.rho$series <- rownames(PIED.rho)
+
+# randomly select 10 cores from each quantile group with varying correlations from regional chronology:
+PSME.q.samps <- PSME.rho %>% filter(! is.na(corr.quant)) %>% dplyr::group_by(corr.quant) %>% sample_n(10)
+PIPO.q.samps <- PIPO.rho %>% filter(! is.na(corr.quant)) %>% dplyr::group_by(corr.quant) %>% sample_n(10)
+PIED.q.samps <- PIED.rho %>% filter(! is.na(corr.quant)) %>% dplyr::group_by(corr.quant) %>% sample_n(10)
+
+
+
+PSME.q.rwi <- as.rwl(PSME.rwi %>% select( PSME.q.samps$series ))
+PIED.q.rwi <- as.rwl(PIED.rwi %>% select( PIED.q.samps$series ))
+PIPO.q.rwi <- as.rwl(PIPO.rwi %>% select( PIPO.q.samps$series )) 
+
+
+
+PSME.q.rwi$year <- years
+PIED.q.rwi$year <- years
+PIPO.q.rwi$year <- years
+
+
+
+# visualize these timeseries:
+PSME.q.rwi.m <- melt(PSME.q.rwi, id.vars = "year")
+PIED.q.rwi.m <- melt(PIED.q.rwi, id.vars = "year")
+PIPO.q.rwi.m <- melt(PIPO.q.rwi, id.vars = "year")
+colnames(PSME.q.rwi.m) <- c("year", "series", "rwi")
+colnames(PIPO.q.rwi.m) <- c("year", "series", "rwi")
+colnames(PIED.q.rwi.m) <- c("year", "series", "rwi")
+
+# merge series to get series intercorrelation:
+PSME.q.rwi.m <- left_join(PSME.q.rwi.m, PSME.q.samps, by = "series")
+PIPO.q.rwi.m <- left_join(PIPO.q.rwi.m, PIPO.q.samps, by = "series")
+PIED.q.rwi.m <- left_join(PIED.q.rwi.m, PIED.q.samps, by = "series")
+
+# add the chronologies:
+PIED.rwi.chron$year <- years
+PIPO.rwi.chron$year <- years
+PSME.rwi.chron$year <- years
+
+# make plots of rwi grouped by residual correlations:
+red.scale <- c("#ece2f0",
+  "#fff7ec",
+  "#fee8c8",
+  "#fdd49e",
+  "#fdbb84",
+  "#fc8d59",
+  "#ef6548",
+  "#d7301f",
+  "#b30000",
+  "#7f0000")
+
+PSME.rwi.plt.cat.corr <- ggplot()+
+  geom_line(data = PSME.q.rwi.m, aes(x = year, y = rwi, group = series, color = corr.quant))+
+  scale_color_manual(values = red.scale)+xlim(1850, 2020)+
+  geom_line(data = PSME.rwi.chron, aes(x = year, y = xxxstd), color = "black", size = 1.5)+
+  ylab("Ring Width Index")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+
+
+
+PIED.rwi.plt.cat.corr <- ggplot()+geom_line(data = PIED.q.rwi.m, aes(x = year, y = rwi, group = series, color = corr.quant))+
+  scale_color_manual(values = red.scale)+xlim(1600, 2000)+
+  geom_line(data = PIED.rwi.chron, aes(x = year, y = xxxstd), color = "black", size = 1.5)+
+  ylab("Ring Width Index")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+PIPO.rwi.plt.cat.corr <- ggplot()+geom_line(data = PIPO.q.rwi.m, aes(x = year, y = rwi, group = series, color = corr.quant))+
+  scale_color_manual(values = red.scale)+xlim(1825, 2020)+
+  geom_line(data = PIPO.rwi.chron, aes(x = year, y = xxxstd), color = "black", size = 1.5)+
+  ylab("Ring Width Index")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+
+
+PSME.rwi.plt.cont.corr <- ggplot()+
+  geom_line(data = PSME.q.rwi.m, aes(x = year, y = rwi, group = series, color = res.cor))+
+  scale_colour_gradient(low = "white", high = "black")+xlim(1850, 2020)+
+  geom_line(data = PSME.rwi.chron, aes(x = year, y = xxxstd), color = "black", size = 1.5)+
+  ylab("Ring Width Index")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+
+PSME.rwi.plt.cont.corr <- ggplot()+geom_line(data = PIED.q.rwi.m, aes(x = year, y = rwi, group = series, color = res.cor))+
+  scale_colour_gradient(low = "white", high = "black")+xlim(1600, 2000)+
+  geom_line(data = PIED.rwi.chron, aes(x = year, y = xxxstd), color = "black", size = 1.5)+
+  ylab("Ring Width Index")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+PSME.rwi.plt.cont.corr <- ggplot()+geom_line(data = PIPO.q.rwi.m, aes(x = year, y = rwi, group = series, color = res.cor))+
+  scale_colour_gradient(low = "white", high = "black")+xlim(1825, 2020)+
+  geom_line(data = PIPO.rwi.chron, aes(x = year, y = xxxstd), color = "black", size = 1.5)+
+  ylab("Ring Width Index")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+
+# plot the raw ring widths based on correlation with master:
+PSME.q.rwl <- as.rwl(PSME.rwl %>% select( PSME.q.samps$series ))
+PIED.q.rwl <- as.rwl(PIED.rwl %>% select( PIED.q.samps$series ))
+PIPO.q.rwl <- as.rwl(PIPO.rwl %>% select( PIPO.q.samps$series )) 
+
+PSME.q.rwl$year <- years
+PIED.q.rwl$year <- years
+PIPO.q.rwl$year <- years
+
+
+
+# visualize these timeseries:
+PSME.q.rwl.m <- melt(PSME.q.rwl, id.vars = "year")
+PIED.q.rwl.m <- melt(PIED.q.rwl, id.vars = "year")
+PIPO.q.rwl.m <- melt(PIPO.q.rwl, id.vars = "year")
+colnames(PSME.q.rwl.m) <- c("year", "series", "rwl")
+colnames(PIPO.q.rwl.m) <- c("year", "series", "rwl")
+colnames(PIED.q.rwl.m) <- c("year", "series", "rwl")
+
+# merge series to get series intercorrelation:
+PSME.q.rwl.m <- left_join(PSME.q.rwl.m, PSME.q.samps, by = "series")
+PIPO.q.rwl.m <- left_join(PIPO.q.rwl.m, PIPO.q.samps, by = "series")
+PIED.q.rwl.m <- left_join(PIED.q.rwl.m, PIED.q.samps, by = "series")
+
+
+# make plots of rwl grouped by residual correlations:
+PSME.rwl.plt <- ggplot(data = PSME.q.rwl.m, aes(x = year, y = rwl, group = series, color = corr.quant))+geom_line()+xlim(1850, 2020)+
+  scale_color_manual(values = red.scale)+xlim(1600, 2000)+
+  ylab("Tree Ring Width (mm)")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+
+PIED.rwl.plt <-ggplot(PIED.q.rwl.m, aes(x = year, y = rwl, group = series, color = corr.quant))+geom_line()+scale_color_manual(values = red.scale)+xlim(1600, 2000)+
+  ylab("Tree Ring Width (mm)")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+PIPO.rwl.plt <-ggplot(PIPO.q.rwl.m, aes(x = year, y = rwl, group = series, color = corr.quant))+geom_line()+xlim(1845, 2020)+scale_color_manual(values = red.scale)+
+  ylab("Tree Ring Width (mm)")+xlab("Year")+theme_bw(base_size = 12)+theme(panel.grid = element_blank())
+
+
+write.csv(PIPO.q.rwl.m, "outputs/random_100_sorted/PIPO_AZ_rwl.csv", row.names = FALSE)
+write.csv(PIED.q.rwl.m, "outputs/random_100_sorted/PIED_AZ_rwl.csv", row.names = FALSE)
+write.csv(PSME.q.rwl.m, "outputs/random_100_sorted/PSME_AZ_rwl.csv", row.names = FALSE)
+
+```
+
+# Ponderosa Pine Time series
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+cowplot::plot_grid(PIPO.rwi.plt.cat.corr, PIPO.rwl.plt, nrow = 2, align = "hv", labels = "AUTO")
+
+
+
+```
+# Pinus Edulis Time Series
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+cowplot::plot_grid(PIED.rwi.plt.cat.corr, PIED.rwl.plt, nrow = 2, align = "hv", labels = "AUTO")
+
+```
+
+# Douglas Fir Time Series
+```{r, echo=FALSE, warning = FALSE, message = FALSE}
+cowplot::plot_grid(PSME.rwi.plt.cat.corr, PSME.rwl.plt, nrow = 2, align = "hv", labels = "AUTO")
+
+```
