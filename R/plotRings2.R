@@ -1,4 +1,5 @@
-# this is adapted from DPLR
+# this is adapted from DPLR, which used to have a similar function. 
+# I took the first half of that function, then used ggplot and gganimate to animate the gif of tree growth
 library(gganimate)
 plotRings2<- function (year, trwN, trwS = NA, trwE = NA, trwW = NA, animation = FALSE, 
           sys.sleep = 0.2, year.labels = TRUE, d2pith = NA, col.rings = "grey", 
