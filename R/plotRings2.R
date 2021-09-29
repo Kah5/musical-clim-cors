@@ -82,9 +82,6 @@ plotRings2<- function (year, trwN, trwS = NA, trwE = NA, trwW = NA, animation = 
   
   circle.data.df <- do.call(rbind, circle.data)
   #geom_path will do open circles, geom_polygon will do filled circles
-  # ggplot(circle.data.df,aes(x,y, col = year)) + geom_path()+ 
-  #   transition_time(year)+ ease_aes('linear')
-  # 
   
   p <- ggplot(circle.data.df, aes(x,y, group = year)) + geom_path(color = "saddlebrown")+coord_equal()+
     theme_bw(base_size = 16)+   theme(panel.grid = element_blank(), axis.text.y = element_blank(), axis.ticks = element_blank(), axis.title.y = element_blank())+
@@ -99,7 +96,7 @@ plotRings2<- function (year, trwN, trwS = NA, trwE = NA, trwW = NA, animation = 
   animate(p, fps = 10, width = 450, height = 460, )
   anim_save(paste0(fpath,"/", fname,".gif"))
  
-  
+ 
 }
  
   
