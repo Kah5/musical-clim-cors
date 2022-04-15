@@ -40,7 +40,8 @@ PSME.1 <- PSME.q.rwl.m %>% filter(series %in% "01112001" & !is.na(rwl))
 PSME.2 <- PSME.q.rwl.m %>% filter(series %in% "03333040" & !is.na(rwl))
 PSME.3 <- PSME.q.rwl.m %>% filter(series %in% "07015504" & !is.na(rwl))
 
-source("R/plotRings2.R")
+source("R/plotRings2_linegif.R")
+
 # Six PIED trees:
 plotRings2(year = as.integer(as.character(PIED.1$year)), trwN= PIED.1$rwl,  saveGIF = TRUE, species = "Pinus edulis", treeid = "1058501", fname = "PIED_1058501_growth")
 plotRings2(year = as.integer(as.character(PIED.2$year)), trwN= PIED.2$rwl,  saveGIF = TRUE, species = "Pinus edulis", treeid = "1060201", fname = "PIED_1060201_growth")
